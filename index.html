@@ -68,13 +68,15 @@ button:disabled{opacity:.4;border-color:var(--bd);color:var(--mut)}select{width:
 <main>
 <header><b>J.A.R.V.I.S.</b><span id="net" class="m"></span><span id="mi" title="Microfone ativo"></span></header>
 <div id="orb" data-s="idle"><i class="a"></i><i class="b"></i><i class="c"></i></div><div id="stl">Em repouso</div>
+<div id="cap" class="m" style="text-align:center;min-height:1.4em;padding:0 14px"></div>
+<div style="text-align:center"><button data-m="on">🎤 Ativar voz</button><button data-m="off">Desativar</button><button data-m="stop">Interromper fala</button><select id="vmd" style="width:auto"><option value="cont">Conversa contínua</option><option value="cmd">Comando por voz</option><option value="ptt">Segurar para falar</option></select><button id="ptt" hidden style="touch-action:none;user-select:none">🎙 Segure para falar</button></div>
 <div id="v-home" class="view"></div>
 <div id="v-chat" class="view" hidden>
 <div id="log" class="pn"></div>
 <div class="row"><input id="q2" placeholder="Digite ou diga “J.A.R.V.I.S.” + comando" autocomplete="off"><button id="send">Enviar</button></div>
 <div class="pn"><h2>Voz</h2><button data-m="on">Ativar escuta</button><button data-m="pause">Pausar</button><button data-m="off">Desativar</button><button data-m="stop">Interromper fala</button>
 <p class="m">Diga “J.A.R.V.I.S.” e o comando. A escuta funciona com o app aberto em primeiro plano; o Android não permite escuta contínua em segundo plano no navegador.</p></div>
-<div class="pn" id="cfg"><h2>Configurações</h2><label>Voz<select id="vz"></select></label><label>Volume<input id="vol" type="range" min="0" max="1" step=".05"></label><label>Velocidade da fala<input id="rate" type="range" min=".6" max="1.6" step=".1"></label><label class="ck"><input id="tts" type="checkbox"> Falar respostas digitadas</label><label class="ck"><input id="lt" type="checkbox"> Tema claro</label><button id="nt">Ativar notificações</button><button id="inst" hidden>Instalar J.A.R.V.I.S.</button><p id="instn" class="m"></p></div>
+<div class="pn" id="cfg"><h2>Configurações</h2><label>Voz<select id="vz"></select></label><label>Volume<input id="vol" type="range" min="0" max="1" step=".05"></label><label>Provedor de voz<select id="eng"><option value="nav">Voz do aparelho</option><option value="gem">Gemini (voz natural)</option><option value="eleven">ElevenLabs</option><option value="gcloud">Google Cloud Text-to-Speech</option><option value="azure">Azure AI Speech</option></select></label><label>Chave do provedor de voz (fica só neste navegador)<input id="tk" type="password" placeholder="cole aqui e saia do campo" autocomplete="off"></label><label>Voz (Gemini: nome · ElevenLabs: ID · Google/Azure: nome)<input id="tvn" placeholder="Charon · pt-BR-Neural2-B · pt-BR-AntonioNeural"></label><label>Modelo da voz (opcional)<input id="tmd" placeholder="gemini-3.1-flash-tts-preview · eleven_multilingual_v2"></label><label>Região (só Azure)<input id="trg" placeholder="brazilsouth"></label><label>Estilo da fala<select id="tst"><option value="auto">Automático (pelo contexto)</option><option value="casual">Casual</option><option value="tecnica">Técnica</option><option value="aviso">Aviso</option><option value="resultado">Resultado</option></select></label><label>Tom da voz do aparelho (grave ↔ agudo)<input id="pit" type="range" min=".5" max="1.4" step=".05"></label><label>Pausa antes de considerar que terminei de falar<input id="sil" type="range" min="600" max="4000" step="100"></label><label class="ck"><input id="brg" type="checkbox"> Interromper o J.A.R.V.I.S. quando eu falar por cima</label><button id="tstv">Testar voz</button><label>Velocidade da fala<input id="rate" type="range" min=".6" max="1.6" step=".1"></label><label class="ck"><input id="tts" type="checkbox"> Falar respostas digitadas</label><label class="ck"><input id="lt" type="checkbox"> Tema claro</label><button id="nt">Ativar notificações</button><button id="inst" hidden>Instalar J.A.R.V.I.S.</button><p id="instn" class="m"></p></div>
 </div>
 <div id="v-cmd" class="view" hidden></div>
 <div id="v-auto" class="view" hidden></div>
@@ -259,14 +261,19 @@ const LBL={idle:'Em repouso',listening:'Escutando',processing:'Processando',thin
 let rec=null,on=false,paused=false,wakeT=0,hist=[],tasks=[],notes=[],V='home';
 const live=()=>!!rec&&!paused,hm=ms=>new Date(ms).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 function setState(s){orb.dataset.s=s;$('#stl').textContent=LBL[s];$('#mi').classList.toggle('on',live())}
-const rest=()=>setState(live()?'listening':'idle');
+const rest=()=>setState(live()?'listening':(on&&paused)?'paused':'idle');
 function fail(m){setState('error');toast(m);setTimeout(rest,2500)}
 function note(text){notes.unshift({ts:now(),text});notes.length=Math.min(notes.length,20);DB.put('notes',notes);refresh()}
 const theme=t=>{document.documentElement.dataset.theme=t;P.theme=t;svp()};
 
 /* Voz: síntese */
-function speak(t){return new Promise(res=>{if(!TTS)return res();TTS.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='pt-BR';u.volume=P.vol;u.rate=P.rate||1;const v=TTS.getVoices().find(x=>x.name===P.voice);if(v)u.voice=v;
-u.onstart=()=>setState('speaking');u.onboundary=()=>{orb.classList.add('beat');setTimeout(()=>orb.classList.remove('beat'),120)};u.onend=u.onerror=()=>{rest();res()};TTS.speak(u)})}
+const GP={ac:null,src:null,ab:null,stopped:0},cap=t=>{const c=$('#cap');if(c)c.textContent=String(t).slice(0,240)};
+const engOf=()=>P.eng||(kget('gemini')?'gem':'nav');
+const clean=t=>String(t).replace(/https?:\/\/\S+/g,' link ').replace(/[*_#`>|~]+/g,'').replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,'').replace(/\s+/g,' ').trim();
+const chunks=(t,lim=450)=>{const o=[];let c='';for(const s of t.split(/(?<=[.!?])\s+/)){if(c&&(c+' '+s).length>lim){o.push(c);c=s}else c=c?c+' '+s:s}if(c)o.push(c);return o};
+function pickVoice(){const vs=TTS.getVoices().filter(v=>/pt[-_]BR/i.test(v.lang)||/portugu/i.test(v.name));return vs.find(v=>v.name===P.voice)||vs.find(v=>/male|masc|ptd|daniel|felipe|antonio|ricardo|luciano/i.test(v.name)&&!/female|fem/i.test(v.name))||vs.find(v=>!v.localService)||vs[0]}
+function navSpeak(t){return new Promise(res=>{if(!TTS)return res();TTS.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='pt-BR';u.volume=P.vol;u.rate=P.rate||1;u.pitch=P.pitch||.85;const v=pickVoice();if(v)u.voice=v;
+u.onstart=()=>setState('speaking');u.onboundary=()=>{orb.classList.add('beat');setTimeout(()=>orb.classList.remove('beat'),120)};u.onend=u.onerror=()=>{MV.spEnd=Date.now();rest();res()};TTS.speak(u)})}
 function fillVoices(){if(!TTS)return;$('#vz').innerHTML=TTS.getVoices().filter(v=>/pt/i.test(v.lang)).map(v=>`<option ${v.name===P.voice?'selected':''}>${esc(v.name)}</option>`).join('')||'<option>Padrão</option>'}
 
 /* Voz: reconhecimento + palavra de ativação (apenas com o app aberto) */
@@ -278,19 +285,21 @@ rec.onerror=e=>{if(/not-allowed|service-not-allowed/.test(e.error)){on=false;fai
 rec.onend=()=>{rec=null;if(on&&!paused)setTimeout(listen,300);rest()};
 try{rec.start();rest()}catch{rec=null}}
 function stopListen(){on=false;paused=false;const r=rec;rec=null;r?.stop();rest()}
-async function onHeard(t){const w=WAKE.test(t);
-if(orb.dataset.s==='speaking'){if(w)TTS.cancel();else return}
-if(!w&&Date.now()-wakeT>2e4)return;wakeT=Date.now();
+async function onHeard(t,force){const w=WAKE.test(t);
+if(orb.dataset.s==='speaking'){if(w)MIC.stop();else return}
+const nt=norm(t),lr=norm(hist.at(-1)?.text||'');if(Date.now()-(MV.spEnd||0)<1500||(nt.length>10&&lr.includes(nt.slice(0,30))))return;
+if(!force&&!w&&Date.now()-wakeT>2e4)return;wakeT=Date.now();SESS.t=Date.now();
+if(/^(jarvis[, ]*)?(encerrar|encerre|finalizar) (a )?conversa|^(tchau|ate logo)( jarvis)?[.! ]*$/.test(nt)){MIC.off();cap('Conversa encerrada.');return void speak('Até logo.')}
 const cmd=t.replace(WAKE,'').replace(/^[\s,.:;!?-]+/,'').trim();
 if(!cmd)return void await speak('Pois não?');
-go('chat');run(cmd,'voz')}
-const MIC={on(){paused=false;listen()},pause(){paused=true;rec?.stop();rest()},off:stopListen,stop(){TTS?.cancel();rest()}};
+run(cmd,'voz')}
+const MIC={on(){paused=false;listen()},pause(){paused=true;rec?.stop();rest()},off:stopListen,stop(){GP.stopped=1;try{GP.ab?.abort()}catch{}try{GP.src?.stop()}catch{}TTS?.cancel();rest()}};
 
 /* Conversa */
 function addMsg(role,text){hist.push({role,text,ts:now()});if(hist.length>100)hist.shift();DB.put('history',hist);refresh()}
-async function run(text,via){addMsg('user',text);setState('processing');let r;
+async function run(text,via){addMsg('user',text);cap('Você: '+text);setState('processing');let r;
 try{r=await route(text)}catch(e){fail('Falha ao executar');r='Não consegui concluir: '+(e.message||e)}
-addMsg('jarvis',r);if(via==='voz'||P.tts)await speak(r);else rest()}
+addMsg('jarvis',r);cap('J.A.R.V.I.S.: '+r);if(via==='voz'||P.tts)await speak(r);else rest();if(via==='voz')wakeT=(P.mode==='cmd')?0:Date.now()}
 
 /* Automações reais (lembretes locais) */
 function parseWhen(t){const n=norm(t);let m=n.match(/(?:em|daqui a)\s+(\d+)\s*(segundo|minuto|hora)/);
@@ -356,7 +365,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-v],[data-m
 if(d.v)go(d.v);else if(d.m)MIC[d.m]();else if(d.q!=null){const a=CMDS[d.q];if(typeof a==='function')a();else{go('chat');run(a,'texto')}}else if(d.tk)taskOp(...d.tk.split(':'))});
 $('#send').onclick=()=>{const v=$('#q2').value.trim();if(v){$('#q2').value='';run(v,'texto')}};
 $('#q2').onkeydown=e=>{if(e.key==='Enter')$('#send').click()};
-$('#vz').onchange=e=>{P.voice=e.target.value;svp()};$('#vol').oninput=e=>{P.vol=+e.target.value;svp()};$('#rate').oninput=e=>{P.rate=+e.target.value;svp()};$('#tts').onchange=e=>{P.tts=e.target.checked;svp()};$('#lt').onchange=e=>theme(e.target.checked?'light':'dark');
+$('#vz').onchange=e=>{P.voice=e.target.value;svp()};$('#vol').oninput=e=>{P.vol=+e.target.value;svp()};$('#rate').oninput=e=>{P.rate=+e.target.value;svp()};$('#pit').oninput=e=>{P.pitch=+e.target.value;svp()};$('#tstv').onclick=()=>speak('Olá. Eu sou o Jarvis. Esta é a minha voz.');$('#tts').onchange=e=>{P.tts=e.target.checked;svp()};$('#lt').onchange=e=>theme(e.target.checked?'light':'dark');
 $('#nt').onclick=async()=>{try{toast('Notificações: '+await Notification.requestPermission())}catch{toast('Indisponível neste ambiente')}refresh()};
 orb.onclick=()=>{if(TTS?.speaking)MIC.stop()};
 addEventListener('online',()=>{netUi();note('Conexão restabelecida')});addEventListener('offline',()=>{netUi();note('Sem conexão')});
@@ -401,16 +410,16 @@ esquecer:async a=>{const m=recall(a.texto||'',1)[0];if(!m)throw Error('nada enco
 
 /* Provedores de IA (Gemini e Anthropic) via chave do usuário */
 const alt=a=>{const o=[];for(const m of a){const l=o.at(-1);if(l&&l.r===m.r)l.t+='\n'+m.t;else o.push({...m})}while(o.length&&o[0].r!=='user')o.shift();return o};
-async function llm(msgs,o){try{return await llm1(msgs,o)}catch(e){const other=BR.prov==='gemini'?'anthropic':'gemini';
+async function llm(msgs,o){try{return await llm1(msgs,o)}catch(e){if([429,500,502,503].includes(e.status)&&!o?.__r){mLog('IA: '+e.status+' · nova tentativa');await new Promise(r=>setTimeout(r,1800));return llm(msgs,{...o,__r:1})}const other=BR.prov==='gemini'?'anthropic':'gemini';
 if(BR.fb&&kget(other)&&!/interrompida/.test(e.message)){mLog('IA '+BR.prov+' falhou ('+e.message.slice(0,60)+'); usando '+other);const pv=BR.prov;BR.prov=other;try{return await llm1(msgs,o)}finally{BR.prov=pv}}
 mLog('IA: '+e.message.slice(0,90));throw e}}
-async function llm1(msgs,{sys,json,search}={}){const pv=BR.prov,key=kget(pv);if(!key)throw Error('chave de API de '+(pv==='gemini'?'Gemini':'Anthropic')+' não configurada (aba Cérebro)');
+async function llm1(msgs,{sys,json,search,max}={}){const pv=BR.prov,key=kget(pv);if(!key)throw Error('chave de API de '+(pv==='gemini'?'Gemini':'Anthropic')+' não configurada (aba Cérebro)');
 AB=new AbortController();const signal=AB.signal;let r,j;
-try{if(pv==='gemini'){const b={systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.r==='user'?'user':'model',parts:[{text:m.t}]}))};if(json)b.generationConfig={responseMimeType:'application/json'};if(search)b.tools=[{google_search:{}}];
-r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+BR.model.gemini+':generateContent',{method:'POST',signal,headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(b)});j=await r.json();if(!r.ok)throw Error(j.error?.message||r.status);
+try{if(pv==='gemini'){const b={systemInstruction:{parts:[{text:sys}]},contents:msgs.map(m=>({role:m.r==='user'?'user':'model',parts:[{text:m.t}]}))};if(json||max)b.generationConfig=Object.assign(json?{responseMimeType:'application/json'}:{},max?{maxOutputTokens:max}:{});if(search)b.tools=[{google_search:{}}];
+r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+BR.model.gemini+':generateContent',{method:'POST',signal,headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(b)});j=await r.json();if(!r.ok)throw Object.assign(Error(j.error?.message||r.status),{status:r.status});
 const c=j.candidates?.[0];return{text:(c?.content?.parts||[]).map(p=>p.text||'').join(''),src:(c?.groundingMetadata?.groundingChunks||[]).map(g=>g.web).filter(Boolean)}}
-const b={model:BR.model.anthropic,max_tokens:2000,system:sys,messages:msgs.map(m=>({role:m.r,content:m.t}))};if(search)b.tools=[{type:'web_search_20250305',name:'web_search'}];
-r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',signal,headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(b)});j=await r.json();if(!r.ok)throw Error(j.error?.message||r.status);
+const b={model:BR.model.anthropic,max_tokens:Math.min(max||2000,16000),system:sys,messages:msgs.map(m=>({role:m.r,content:m.t}))};if(search)b.tools=[{type:'web_search_20250305',name:'web_search'}];
+r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',signal,headers:{'Content-Type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(b)});j=await r.json();if(!r.ok)throw Object.assign(Error(j.error?.message||r.status),{status:r.status});
 return{text:j.content.filter(x=>x.type==='text').map(x=>x.text).join(''),src:[]}}
 catch(e){throw e.name==='AbortError'?Error('operação interrompida pelo usuário'):e}}
 
@@ -424,14 +433,14 @@ for(const a of acts){const f=TOOLS[a.ferramenta],key=a.ferramenta+JSON.stringify
 if(!f)m='✖ ferramenta inexistente: '+a.ferramenta;
 else if(!permitted(a.ferramenta,ag))m='✖ '+a.ferramenta+': fora das permissões dos agentes acionados';
 else if(DONE.has(key)&&Date.now()-DONE.get(key)<6e4)m='↺ duplicada, ignorada: '+a.ferramenta;
-else try{m='✔ '+await f(a.args||{});DONE.set(key,Date.now())}catch(e){m='✖ '+a.ferramenta+' falhou: '+e.message}
+else try{const rr=await f(a.args||{});m=(String(rr).startsWith('⚠')?'':'✔ ')+rr;DONE.set(key,Date.now())}catch(e){m='✖ '+a.ferramenta+' falhou: '+e.message}
 out.push(m);OPSL.push({ts:now(),t:a.ferramenta,r:m})}
 OPSL=OPSL.slice(-100);DB.put('brain_ops',OPSL);setState('verifying');return out}
 async function think(text){setState('planning');const msgs=alt(hist.slice(-12).map(m=>({r:m.role==='user'?'user':'assistant',t:m.text})));
 if(/pesquis|not[ií]cias|[úu]ltimas|cota[çc]|pre[çc]o d[eao]|quanto custa|o que (est[áa]|aconteceu)/i.test(text)){setState('researching');const r=await llm(msgs,{sys:sysBuild(text,1),search:true});
 return r.text+(r.src.length?'\n\nFontes:\n'+r.src.slice(0,4).map(s=>'• '+s.title+' — '+s.uri).join('\n'):'')}
 const p=parseJ((await llm(msgs,{sys:sysBuild(text),json:true})).text);if(p.duvida)return p.duvida;
-const res=await runActions(p.acoes,p.agentes);return(p.resposta||'Certo.')+(res.length?'\n\n'+res.join('\n'):'')}
+const res=await runActions(p.acoes,p.agentes);if(res.some(x=>x.startsWith('✖')||x.startsWith('⚠')||x.startsWith('⏸')))return'Não concluí tudo. Resultado real:\n'+res.join('\n');return(p.resposta||'Certo.')+(res.length?'\n\n'+res.join('\n'):'')}
 JARVIS_CORE.brain=think;
 const _st=MIC.stop;MIC.stop=()=>{AB?.abort();_st()};
 
@@ -482,31 +491,33 @@ function mLog(m){MV.errs.unshift({ts:now(),m});MV.errs.length=Math.min(MV.errs.l
 function mFail(m){mLog(m);try{rec?.stop()}catch{}rec=null;on=false;paused=false;setState('error');mstat(m,true);setTimeout(rest,3e3);return false}
 const micMsg=e=>({NotAllowedError:window.top!==window?'Este quadro (iframe) não tem permissão de microfone. Abra o app pelo endereço HTTPS do seu site, fora do editor ou da pré-visualização.':'Permissão do microfone negada. Libere o microfone nas configurações do site (cadeado do navegador) e tente novamente.',NotFoundError:'Nenhum microfone encontrado neste dispositivo.',NotReadableError:'O microfone está em uso por outro aplicativo.',SecurityError:'O microfone exige HTTPS.',TypeError:'Microfone indisponível: o app precisa ser servido por HTTPS.'}[e.name]||'Falha no microfone: '+(e.message||e.name));
 async function reqMic(keep){setState('asking');mstat('Solicitando permissão do microfone…');
-try{if(!window.isSecureContext)throw Object.assign(Error('http'),{name:'SecurityError'});const s=await navigator.mediaDevices.getUserMedia({audio:true});MV.perm='concedida';if(!keep)s.getTracks().forEach(t=>t.stop());mstat('');return keep?s:true}
+try{if(!window.isSecureContext)throw Object.assign(Error('http'),{name:'SecurityError'});const s=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});MV.perm='concedida';if(!keep)s.getTracks().forEach(t=>t.stop());mstat('');return keep?s:true}
 catch(e){MV.perm=e.name==='NotAllowedError'?'negada':'erro';return mFail(micMsg(e))}}
 async function useGem(why){MV.eng='gemini';mLog(why);try{rec?.stop()}catch{}rec=null;const s=await reqMic(true);if(s){await startRec(s);mstat('Modo Gemini: toque no microfone para falar (a palavra de ativação só funciona no modo do navegador).')}}
 function nErr(c){if(['no-speech','aborted'].includes(c))return;
 if(['network','service-not-allowed','language-not-supported'].includes(c)){if(kget('gemini')&&MV.pref!=='nativo')return useGem('Reconhecimento do navegador indisponível ('+c+'); usando Gemini.');return mFail(c==='network'?'O serviço de reconhecimento do navegador não respondeu (sem internet ou bloqueado). Configure a chave Gemini na aba Cérebro para a transcrição alternativa.':'O reconhecimento de voz deste navegador não está disponível ('+c+').')}
 if(c==='not-allowed')return mFail(micMsg({name:'NotAllowedError'}));if(c==='audio-capture')return mFail(micMsg({name:'NotFoundError'}));mLog('Erro de voz: '+c)}
 function startNative(){const r=new SR(),t0=Date.now(),wd=setTimeout(()=>{if(rec!==r){try{r.abort()}catch{}nErr('network')}},5000);r.lang='pt-BR';r.continuous=true;r.interimResults=false;
-r.onstart=()=>{clearTimeout(wd);rec=r;MV.q=0;mstat('');rest()};
+r.onspeechstart=()=>{if(P.barge!==false&&(GP.src||TTS?.speaking))MIC.stop()};r.onstart=()=>{clearTimeout(wd);rec=r;MV.q=0;mstat('');rest()};
 r.onresult=async e=>{setState('transcribing');MV.last={ts:now()};await onHeard(e.results[e.results.length-1][0].transcript.trim());rest()};
 r.onerror=e=>{clearTimeout(wd);nErr(e.error)};
-r.onend=()=>{clearTimeout(wd);if(rec===r)rec=null;if(on&&!paused&&MV.eng==='nativo'){MV.q=Date.now()-t0<1500?MV.q+1:0;if(MV.q>4)return void mFail('O reconhecimento encerra imediatamente. Verifique o microfone e a conexão.');setTimeout(startNative,400)}else rest()};
+r.onend=()=>{clearTimeout(wd);if(rec===r)rec=null;if(on&&!paused&&MV.eng==='nativo'){MV.q=Date.now()-t0<1500?MV.q+1:0;if(MV.q>4)return void mFail('O reconhecimento encerra imediatamente. Verifique o microfone e a conexão.');setState('reconn');setTimeout(startNative,400)}else rest()};
 try{r.start()}catch(e){mFail('Não foi possível iniciar o reconhecimento: '+e.message)}}
 async function startRec(s){const AC=window.AudioContext||window.webkitAudioContext,ac=new AC();await ac.resume();const an=ac.createAnalyser(),b=new Float32Array(1024);ac.createMediaStreamSource(s).connect(an);
-const mime=['audio/webm;codecs=opus','audio/mp4','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';let mr=null,ch=[],t0=0,q=0;
-const iv=setInterval(()=>{an.getFloatTimeDomainData(b);const rms=Math.sqrt(b.reduce((a,x)=>a+x*x,0)/b.length);MV.lvl=rms;
-if(rms>.02){q=0;if(!mr&&!MV.busy){ch=[];t0=Date.now();const m=mr=new MediaRecorder(s,mime?{mimeType:mime}:{});m.ondataavailable=e=>e.data.size&&ch.push(e.data);m.onstop=()=>{const bl=new Blob(ch,{type:m.mimeType});if(mr===m)mr=null;if(Date.now()-t0>600&&Date.now()-wakeT<=2e4)sendAudio(bl);else rest()};m.start()}}
-else if(mr&&(++q>12||Date.now()-t0>15e3)&&mr.state==='recording'){setState('audio');mr.stop()}},100);
+const mime=['audio/webm;codecs=opus','audio/mp4','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'';let mr=null,ch=[],t0=0,q=0,bg=0,fl=.005;
+const iv=setInterval(()=>{if(paused)return;an.getFloatTimeDomainData(b);const rms=Math.sqrt(b.reduce((a,x)=>a+x*x,0)/b.length);MV.lvl=rms;const thr=Math.max(.02,fl*4);
+if(GP.src||TTS?.speaking){if(P.barge!==false&&rms>Math.max(.06,thr*1.5)){if(++bg>=3){bg=0;MIC.stop()}}else bg=0;return}
+bg=0;if(!mr&&rms<=thr)fl=fl*.98+rms*.02;
+if(rms>thr){q=0;if(!mr&&!MV.busy){ch=[];t0=Date.now();const m=mr=new MediaRecorder(s,mime?{mimeType:mime}:{});m.ondataavailable=e=>e.data.size&&ch.push(e.data);m.onstop=()=>{const bl=new Blob(ch,{type:m.mimeType});if(mr===m)mr=null;if(Date.now()-t0>600&&Date.now()-wakeT<=2e4)sendAudio(bl);else rest()};m.start();setState('listening')}}
+else if(mr&&(++q>(P.sil||1400)/100||Date.now()-t0>3e4)&&mr.state==='recording'){setState('audio');mr.stop()}},100);
 rec={stop(){clearInterval(iv);try{mr?.state==='recording'&&mr.stop()}catch{}s.getTracks().forEach(t=>t.stop());ac.close()}};rest()}
-async function sendAudio(bl){MV.busy=true;setState('transcribing');
+async function sendAudio(bl,force){MV.busy=true;setState('transcribing');
 try{const d=await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.split(',')[1]);f.readAsDataURL(bl)});
 const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+BR.model.gemini+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':kget('gemini')},body:JSON.stringify({contents:[{parts:[{text:'Transcreva fielmente o áudio em português do Brasil. Responda somente com a transcrição; se não houver fala, responda vazio.'},{inline_data:{mime_type:bl.type.split(';')[0],data:d}}]}]})});
-const j=await r.json();if(!r.ok)throw Error(j.error?.message||r.status);const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();MV.last={ts:now()};if(t)await onHeard(t)}
+const j=await r.json();if(!r.ok)throw Error(j.error?.message||r.status);const t=(j.candidates?.[0]?.content?.parts||[]).map(p=>p.text||'').join('').trim();MV.last={ts:now()};if(t)await onHeard(t,force)}
 catch(e){mLog('Transcrição: '+e.message);toast('Falha na transcrição: '+e.message.slice(0,80))}finally{MV.busy=false;rest()}}
 listen=async()=>{if(rec||MV.starting)return;MV.starting=1;on=true;paused=false;
-try{const eng=MV.pref==='gemini'||(MV.pref==='auto'&&!SR)?'gemini':'nativo';
+try{const eng=MV.pref==='gemini'||(MV.pref==='auto'&&(!SR||(kget('gemini')&&mode()!=='cmd')))?'gemini':'nativo';
 if(eng==='nativo'&&!SR)return mFail('Este navegador não tem reconhecimento de voz. Use o Chrome no Android ou configure a transcrição por Gemini.');
 if(eng==='gemini'&&!kget('gemini'))return mFail('A transcrição por serviço exige a chave Gemini (aba Cérebro).');
 const s=await reqMic(eng==='gemini');if(!s)return;MV.eng=eng;if(eng==='gemini'){await startRec(s);mstat('Modo Gemini: toque no microfone para falar (a palavra de ativação só funciona no modo do navegador).')}else{setState('idle');mstat('Iniciando o reconhecimento de voz…');startNative()}}
@@ -552,14 +563,16 @@ await new Promise(r=>{const iv=setInterval(()=>{an.getFloatTimeDomainData(b);mx=
 s.getTracks().forEach(t=>t.stop());ac.close();rest();DG.mic={ts:now(),pico:mx.toFixed(3),ok:mx>.01};toast(DG.mic.ok?'Captura de áudio confirmada':'Nenhum som captado: verifique o microfone')}
 async function renderDiag(){const dg=$('#dg');if(!SES){dg.innerHTML='';return}
 const D=await probe(),k=p=>kget(p)?'chave configurada':'chave em branco',PT={granted:'concedida',denied:'negada',prompt:'ainda não solicitada'};
-const R=[['HTTPS',D.sec?'sim':'NÃO'],['PWA: service worker',navigator.serviceWorker?.controller?'ativo':'não ativo (exige HTTPS e o arquivo sw.js)'],['PWA: modo instalado',matchMedia('(display-mode: standalone)').matches?'sim':'não'],['Página dentro de iframe',D.frame?'sim (pode bloquear o microfone)':'não'],['Política de microfone da página',D.pol],['Permissão do microfone',PT[D.perm]||D.perm],['Dispositivos de áudio',D.dev],['Captura de áudio agora',live()?'ativa ('+MV.eng+')':'inativa'],['Reconhecimento do navegador',SR?'suportado':'não suportado'],['Transcrição por serviço (Gemini)',k('gemini')],['Último reconhecimento',MV.last?.ts.slice(11,19)||'nenhum'],['Síntese de voz',TTS?TTS.getVoices().length+' vozes':'não suportada'],['Modelo de IA',BR.prov+' · '+BR.model[BR.prov]+' · '+k(BR.prov)],['Servidor','sem backend (app local) · '+(navigator.onLine?'online':'offline')],['WhatsApp','não conectado'],['Calendário externo','não conectado'],['Contatos',navigator.contacts?.select?'disponível':'indisponível neste dispositivo'],['Automações','lembretes locais (com o app aberto)'],['Teste de captura',DG.mic?(DG.mic.ok?'ok':'sem som')+' · pico '+DG.mic.pico+' · '+DG.mic.ts.slice(11,19):'não realizado'],['Teste de IA',DG.ia||'não realizado'],['Teste de voz',DG.voz||'não realizado'],['Última verificação',D.ts.slice(11,19)]];
+const R=[['HTTPS',D.sec?'sim':'NÃO'],['PWA: service worker',navigator.serviceWorker?.controller?'ativo':'não ativo (exige HTTPS e o arquivo sw.js)'],['PWA: modo instalado',matchMedia('(display-mode: standalone)').matches?'sim':'não'],['Página dentro de iframe',D.frame?'sim (pode bloquear o microfone)':'não'],['Política de microfone da página',D.pol],['Permissão do microfone',PT[D.perm]||D.perm],['Dispositivos de áudio',D.dev],['Captura de áudio agora',live()?'ativa ('+MV.eng+')':'inativa'],['Reconhecimento do navegador',SR?'suportado':'não suportado'],['Transcrição por serviço (Gemini)',k('gemini')],['Último reconhecimento',MV.last?.ts.slice(11,19)||'nenhum'],['Síntese de voz',TTS?TTS.getVoices().length+' vozes':'não suportada'],['Modelo de IA',BR.prov+' · '+BR.model[BR.prov]+' · '+k(BR.prov)],['Servidor','sem backend (app local) · '+(navigator.onLine?'online':'offline')],['Banco de dados','local (IndexedDB) · sem servidor'],['Armazenamento (teste)',DG.arm||'não testado'],['Motor de tarefas',JOBS.length?JOBS.length+' execução(ões) · última: '+JST[JOBS[0].estado]:'nenhuma execução'],['Ambiente de execução (iframe isolado)',DG.amb||'não testado'],['Aba Projetos',PR.list.length+' projeto(s) · '+PR.list.reduce((a,x)=>a+Object.keys(x.files).length,0)+' arquivo(s)'],['Notificações',window.Notification?({granted:'permitidas',denied:'bloqueadas',default:'não solicitadas'})[Notification.permission]:'não suportadas'],['Voz (síntese)',engOf()+' · '+(engOf()==='nav'?'voz do aparelho':((engOf()==='gem'?kget('gemini'):kget('tts_'+engOf()))?'chave configurada':'chave em branco'))+' · último teste: '+(DG.voz||'nenhum')],['WhatsApp','não conectado'],['Calendário externo','não conectado'],['Contatos',navigator.contacts?.select?'disponível':'indisponível neste dispositivo'],['Automações','lembretes locais (com o app aberto)'],['Teste de captura',DG.mic?(DG.mic.ok?'ok':'sem som')+' · pico '+DG.mic.pico+' · '+DG.mic.ts.slice(11,19):'não realizado'],['Teste de IA',DG.ia||'não realizado'],['Teste de voz',DG.voz||'não realizado'],['Última verificação',D.ts.slice(11,19)]];
 dg.innerHTML=`<h2>Diagnóstico</h2><table>${R.map(([a,b])=>`<tr><td>${a}</td><td>${esc(b)}</td></tr>`).join('')}</table>
 <label>Reconhecimento de voz<select id='dgp'>${[['auto','Automático'],['nativo','Navegador'],['gemini','Gemini (serviço)']].map(([v,l])=>`<option value='${v}'${MV.pref===v?' selected':''}>${l}</option>`).join('')}</select></label>
-<button data-dg='probe'>Verificar agora</button><button data-dg='mic'>Testar captura</button><button data-dg='voz'>Testar voz</button><button data-dg='ia'>Testar IA</button>
+<button data-dg='probe'>Verificar agora</button><button data-dg='mic'>Testar captura</button><button data-dg='voz'>Testar voz</button><button data-dg='ia'>Testar IA</button><button data-dg='arm'>Testar armazenamento</button><button data-dg='amb'>Testar ambiente</button>
 <h2>Últimos erros</h2>${MV.errs.map(e=>`<p class='m'>${esc(e.ts.slice(11,19))} · ${esc(e.m)}</p>`).join('')||"<p class='m'>Nenhum.</p>"}`}
 $('#dg').onclick=async e=>{const b=e.target.closest('[data-dg]');if(!b)return;const a=b.dataset.dg;
 if(a==='mic')await micTest();
 else if(a==='voz'){try{await speak('Teste de voz do J.A.R.V.I.S.');DG.voz='executado '+now().slice(11,19)}catch{DG.voz='falhou'}}
+else if(a==='arm'){try{await DB.put('diag_t',{t:Date.now()});const v=await DB.get('diag_t');DG.arm=v?.t?'funcionando · '+now().slice(11,19):'falhou (leitura vazia)'}catch(x){DG.arm='falhou: '+x.message}}
+else if(a==='amb'){DG.amb=(await ambTest())?'funcionando · '+now().slice(11,19):'falhou: o iframe isolado não executou'}
 else if(a==='ia'){try{const r=await llm([{r:'user',t:'Responda apenas: ok'}],{sys:'Responda em uma palavra.'});DG.ia='ok · '+now().slice(11,19)}catch(x){DG.ia='falhou: '+x.message.replace(/AIza[\w-]+|sk-[\w-]+/g,'***').slice(0,90);mLog('IA: '+DG.ia)}rest()}
 renderDiag()};
 $('#dg').onchange=e=>{if(e.target.id==='dgp'){MV.pref=e.target.value;LS.set('jv_mic',MV.pref)}};
@@ -610,24 +623,13 @@ function pvDoc(q,page='index.html'){let h=q.files[page]||'';const inj='<script>a
 h=h.replace(/<link[^>]+href=["']?([^"'\s>]+\.css)["']?[^>]*>/gi,(m,f)=>q.files[f]!=null?'<style>'+q.files[f]+'</style>':m).replace(/<script([^>]*)src=["']?([^"'\s>]+\.js)["']?([^>]*)>\s*<\/script>/gi,(m,a,f,b)=>q.files[f]!=null?'<script'+a+b+'>'+q.files[f].replace(/<\/script/gi,'<\\/script')+'<\/script>':m);
 return/<head[^>]*>/i.test(h)?h.replace(/<head[^>]*>/i,m=>m+inj):inj+h}
 function previewErrors(q){return new Promise(res=>{const E=[],f=document.createElement('iframe');f.sandbox='allow-scripts';f.style.cssText='position:fixed;left:-9999px;width:360px;height:640px';const on=e=>{if(e.source===f.contentWindow&&e.data?.jv==='err')E.push(String(e.data.m).slice(0,120))};addEventListener('message',on);f.srcdoc=pvDoc(q);document.body.appendChild(f);setTimeout(()=>{removeEventListener('message',on);f.remove();res([...new Set(E)])},2000)})}
-async function buildSite(req,edit,att=0){req=String(req||'').trim();if(!req)throw Error('pedido vazio');let q=curP();if(edit&&!q)throw Error('não há projeto atual para editar');setState('exec');
-const sys=PERSONA+'Você é o agente desenvolvedor web. Gere um site estático REAL e profissional: HTML5 semântico, CSS moderno responsivo (mobile first), JavaScript puro quando necessário, sem build nem dependências externas (fontes do Google são permitidas), acessível e com design cuidadoso. O código roda em um iframe isolado: envolva localStorage/sessionStorage em try/catch e não use fetch para serviços externos. Não existe backend: simule só o que for possível no navegador e registre em observacoes o que exigiria servidor. Responda SOMENTE JSON: {"nome":"","resumo":"","observacoes":"","arquivos":[{"caminho":"index.html","conteudo":""}]}. Caminhos relativos simples (html, css, js, json, svg, txt, md). Em edição devolva SOMENTE os arquivos alterados, completos.';
-const ctx=edit?'\nARQUIVOS ATUAIS:\n'+Object.entries(q.files).map(([n,c])=>'=== '+n+'\n'+c).join('\n').slice(0,60000):'';
-const r=await llm([{r:'user',t:(edit?'Altere o projeto: ':'Crie um site: ')+req+ctx}],{sys,json:true}),j=parseJ(r.text),fs=(j.arquivos||[]).filter(a=>a&&okPath(a.caminho)&&typeof a.conteudo==='string'&&a.conteudo.length<4e5);
-if(!fs.length)throw Error('o modelo não devolveu arquivos válidos');
-if(!edit){q={id:uid(),nome:String(j.nome||'Projeto').slice(0,40),files:{},ver:[],c:now()};PR.list.push(q)}else q.ver.push({ts:now(),nota:req.slice(0,60),files:{...q.files}});
-fs.forEach(a=>q.files[a.caminho]=a.conteudo);if(!q.files['index.html'])throw Error('faltou index.html');
-PR.cur=q.id;q.ver=q.ver.slice(-15);PG='index.html';savePR();setState('verifying');
-const miss=refsMissing(q.files),errs=await previewErrors(q);
-if((errs.length||miss.length)&&att<1)return'Corrigido automaticamente após detectar problemas. '+await buildSite('Corrija: '+[...errs.map(e=>'erro JS: '+e),...miss.map(m=>'arquivo ausente: '+m)].join('; '),true,1);
-renderProj();return(edit?'Projeto atualizado':'Projeto criado')+' — '+q.nome+': '+fs.length+' arquivo(s) gravado(s). '+(errs.length||miss.length?'⚠ Ainda há problemas: '+[...errs,...miss.map(m=>'ausente '+m)].join('; ')+'. ':'Verificação: sem erros de execução nem referências quebradas. ')+(j.observacoes?'Obs.: '+j.observacoes+' ':'')+'Veja na aba Projetos.'}
 const pvw=document.createElement('div');pvw.id='v-proj';pvw.className='view';pvw.hidden=true;$('main').appendChild(pvw);
 const pbt=document.createElement('button');pbt.dataset.v='proj';pbt.textContent='Projetos';$('#nav').insertBefore(pbt,$('#nav').lastElementChild);
 const _g3=go;go=v=>{_g3(v);if(v==='proj')renderProj()};
 function renderProj(){const q=curP();pvw.innerHTML=`<div class='pn'><h2>Projetos</h2><label>Projeto<select id='pj'>${PR.list.map(x=>`<option value='${x.id}'${x.id===PR.cur?' selected':''}>${esc(x.nome)}</option>`).join('')||'<option>nenhum</option>'}</select></label>
-${q?`<p class='m'>${Object.keys(q.files).map(esc).join(' · ')}</p><iframe id='pf' sandbox='allow-scripts' style='width:100%;height:55vh;border:1px solid var(--bd);border-radius:10px;background:#fff'></iframe>
+${q?`<p class='m'>${esc(q.desc||'')}${q.estado?' · estado: '+esc(q.estado):''}</p><p class='m'>${Object.keys(q.files).map(esc).join(' · ')}</p>${testHtml(q)}<iframe id='pf' sandbox='allow-scripts' style='width:100%;height:55vh;border:1px solid var(--bd);border-radius:10px;background:#fff'></iframe>
 <label>Pedir alteração<input id='pi' placeholder='Ex.: deixe o menu mais elegante'></label><button id='pa'>Aplicar</button><button id='pn'>Novo site</button><button id='pz'>Exportar ZIP</button><button id='pc'>Copiar arquivo</button><button id='pd'>Excluir</button>
-<h2>Versões</h2>${q.ver.slice().reverse().map((v,i)=>`<p class='m'>${esc(v.ts.slice(0,16).replace('T',' '))} · antes de: ${esc(v.nota)} <button data-rv='${q.ver.length-1-i}'>Restaurar</button></p>`).join('')||"<p class='m'>Sem versões anteriores.</p>"}`:`<p class='m'>Nenhum projeto ainda. Peça no chat (ex.: “crie um site para vender meus produtos”) ou toque em Novo site.</p><button id='pn'>Novo site</button>`}</div>`;
+<h2>Versões</h2>${q.ver.slice().reverse().map((v,i)=>`<p class='m'>${esc(v.ts.slice(0,16).replace('T',' '))} · antes de: ${esc(v.nota)} <button data-rv='${q.ver.length-1-i}'>Restaurar</button></p>`).join('')||"<p class='m'>Sem versões anteriores.</p>"}`:`<p class='m'>Nenhum projeto ainda. Peça no chat (ex.: “crie um site para vender meus produtos”) ou toque em Novo site.</p><button id='pn'>Novo site</button>`}</div>${jobsHtml()}`;
 if(q)$('#pf').srcdoc=pvDoc(q,PG)}
 pvw.onclick=async e=>{const b=e.target.closest('button');if(!b)return;const q=curP(),id=b.id;
 if(b.dataset.rv!=null){const v=q.ver[+b.dataset.rv];q.ver.push({ts:now(),nota:'restauração',files:{...q.files}});q.files={...v.files};savePR();renderProj()}
@@ -635,6 +637,7 @@ else if(id==='pa'){const t=$('#pi').value.trim();if(!t)return;b.classList.add('l
 else if(id==='pn'){const f=await modal('Novo site',[['t','Descreva o site','area']]);if(f?.t){try{addMsg('jarvis',await buildSite(f.t,false))}catch(x){toast('Falha: '+x.message)}rest();renderProj()}}
 else if(id==='pz'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([zipFiles(q.files)],{type:'application/zip'}));a.download=q.nome.replace(/\W+/g,'-')+'.zip';a.click();toast('ZIP gerado. Se o download não iniciar neste ambiente, use “Copiar arquivo”.')}
 else if(id==='pc'){const n=await modal('Copiar arquivo',[['n','Arquivo','text',PG]]);if(n&&q.files[n.n])await modal(n.n,[['c','Conteúdo','area',q.files[n.n]]])}
+else if(id==='jstop'){AB?.abort();toast('Interrompendo a execução…')}
 else if(id==='pd'){if(await modal('Excluir projeto?',[],'Remove arquivos e versões.')){PR.list=PR.list.filter(x=>x!==q);PR.cur=PR.list[0]?.id||null;savePR();renderProj()}}};
 pvw.onchange=e=>{if(e.target.id==='pj'){PR.cur=e.target.value;PG='index.html';savePR();renderProj()}};
 addEventListener('message',e=>{const q=curP(),f=$('#pf');if(q&&f&&e.source===f.contentWindow&&e.data?.jv==='nav'){const h=String(e.data.h).replace(/^\.\//,'');if(q.files[h]){PG=h;f.srcdoc=pvDoc(q,h)}}});
@@ -700,7 +703,83 @@ progresso_cyber:async a=>{const q=norm(a.topico||''),k=CYT.find(x=>x[0]===q||nor
 Object.assign(RISK,{preferencia:1,progresso_cyber:1});PERM.progresso_cyber=['ciberseguranca'];
 const apmHtml=()=>`<div class='pn'><h2>Personalidade adaptativa (${APM.length})</h2>${APM.map(p=>`<p><b>${p.cat}</b> ${esc(p.key)} = ${esc(p.val)} <span class='m'>${kind(p)}${p.ctx&&p.ctx!=='*'?' · '+p.ctx:''} · ${p.n}x</span> ${p.scope==='temp'?`<button data-ap='${p.id}'>Tornar permanente</button>`:''}<button data-ad='${p.id}'>✕</button></p>`).join('')||"<p class='m'>Nada aprendido ainda.</p>"}<p class='m'>Correções: ${STAT.corr} · repetidas: ${STAT.rep} · confirmações: ${STAT.conf} · refazer: ${STAT.redo}</p><button id='aclr'>Apagar preferências</button></div><div class='pn'><h2>Mentor Cyber</h2><p class='m'>${esc(cySummary())}</p></div>`;
 
-async function init(){hist=await DB.get('history')||[];PR.list=await DB.get('proj')||[];PR.cur=await DB.get('proj_cur')||PR.list[0]?.id||null;tasks=await DB.get('tasks')||[];notes=await DB.get('notes')||[];
+/* ===== EVOLUÇÃO 2: voz conversacional, TTS multi-provedor, motor de tarefas e projetos verificáveis ===== */
+Object.assign(LBL,{paused:'Pausado',reconn:'Reconectando'});
+const mode=()=>P.mode||'cont',SESS={t:0};
+/* Sessão de voz: conversa contínua mantém a janela de ativação; encerra por inatividade ou por voz */
+setInterval(()=>{if(on&&!paused&&mode()!=='ptt'){if(mode()==='cont')wakeT=Date.now();if(SESS.t&&Date.now()-SESS.t>(P.idle||300)*1e3){MIC.off();cap('Sessão de voz encerrada por inatividade.');toast('Sessão de voz encerrada por inatividade')}}},4e3);
+const _on2=MIC.on;MIC.on=()=>{if(mode()==='ptt'){toast('Modo “Segurar para falar”: mantenha o botão pressionado enquanto fala.');return}SESS.t=Date.now();_on2()};
+/* Segurar para falar (compartilha o mesmo contexto e o mesmo cérebro) */
+const PTT={mr:null,ch:[],nr:null,
+async down(){if(PTT.mr||PTT.nr)return;MIC.stop();wakeT=Date.now();SESS.t=Date.now();
+if(kget('gemini')&&MV.pref!=='nativo'){const s=await reqMic(true);if(!s)return;const mime=['audio/webm;codecs=opus','audio/mp4','audio/webm'].find(t=>MediaRecorder.isTypeSupported(t))||'',m=PTT.mr=new MediaRecorder(s,mime?{mimeType:mime}:{});PTT.ch=[];m.ondataavailable=e=>e.data.size&&PTT.ch.push(e.data);
+m.onstop=()=>{s.getTracks().forEach(t=>t.stop());const bl=new Blob(PTT.ch,{type:m.mimeType});PTT.mr=null;if(bl.size>1500)sendAudio(bl,true);else rest()};m.start();setState('listening');$('#ptt').classList.add('ld')}
+else if(SR){const r=PTT.nr=new SR();r.lang='pt-BR';r.interimResults=false;r.onresult=e=>onHeard(e.results[0][0].transcript.trim(),true);r.onerror=e=>nErr(e.error);r.onend=()=>{PTT.nr=null;$('#ptt').classList.remove('ld');rest()};try{r.start();setState('listening');$('#ptt').classList.add('ld')}catch(e){mFail('Não foi possível iniciar: '+e.message)}}
+else mFail('Sem reconhecimento disponível: configure a chave Gemini.')},
+up(){try{PTT.mr?.state==='recording'&&PTT.mr.stop()}catch{}try{PTT.nr?.stop()}catch{}$('#ptt').classList.remove('ld')}};
+$('#vmd').value=mode();$('#ptt').hidden=mode()!=='ptt';
+$('#vmd').onchange=e=>{P.mode=e.target.value;svp();$('#ptt').hidden=P.mode!=='ptt';if(P.mode==='ptt')MIC.off()};
+$('#ptt').onpointerdown=e=>{e.preventDefault();PTT.down()};['pointerup','pointerleave','pointercancel'].forEach(ev=>$('#ptt').addEventListener(ev,()=>PTT.up()));$('#ptt').oncontextmenu=e=>e.preventDefault();
+/* Síntese de voz: camada independente de provedor */
+const styleOf=t=>/^(aten[cç]|falha|erro|n[aã]o consegui|⚠|✖)/i.test(t)?'aviso':/(✔|criado|conclu[ií]do|pronto|atualizado)/i.test(t)?'resultado':/(arquivo|c[oó]digo|api|servidor|html|css|javascript|fun[cç][aã]o|banco de dados)/i.test(t)?'tecnica':'casual';
+const STY={casual:'descontraído, natural e simpático',tecnica:'claro, preciso e pausado',aviso:'objetivo e firme',resultado:'seguro e profissional'};
+const xesc=s=>s.replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]));
+async function jf(url,opt,signal){const r=await fetch(url,{...opt,signal});if(!r.ok){let m=r.status;try{m=(await r.json()).error?.message||m}catch{}throw Object.assign(Error(m),{status:r.status})}return r}
+async function synth(prov,t,sig,sty){const ac=GP.ac||(GP.ac=new(window.AudioContext||window.webkitAudioContext)()),dec=ab=>ac.decodeAudioData(ab);
+if(prov==='gem'){const r=await jf('https://generativelanguage.googleapis.com/v1beta/models/'+(P.tm?.gem||'gemini-3.1-flash-tts-preview')+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':kget('gemini')},body:JSON.stringify({contents:[{parts:[{text:'Diga em português do Brasil, em tom '+STY[sty]+': '+t}]}],generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:P.tv?.gem||P.gv||'Charon'}}}}})},sig),j=await r.json(),x=j.candidates?.[0]?.content?.parts?.find(p=>p.inlineData);if(!x)throw Error('a resposta veio sem áudio');
+const rate=+(/rate=(\d+)/.exec(x.inlineData.mimeType||'')?.[1]||24000),pcm=ub64(x.inlineData.data),n=pcm.length>>1,buf=ac.createBuffer(1,n,rate),ch=buf.getChannelData(0),dv=new DataView(pcm.buffer,pcm.byteOffset,pcm.byteLength);for(let i=0;i<n;i++)ch[i]=dv.getInt16(i*2,true)/32768;return buf}
+if(prov==='eleven'){const id=P.tv?.eleven;if(!id)throw Error('informe o ID da voz do ElevenLabs');const r=await jf('https://api.elevenlabs.io/v1/text-to-speech/'+encodeURIComponent(id)+'?output_format=mp3_44100_128',{method:'POST',headers:{'xi-api-key':kget('tts_eleven'),'Content-Type':'application/json'},body:JSON.stringify({text:t,model_id:P.tm?.eleven||'eleven_multilingual_v2',voice_settings:{stability:sty==='tecnica'?.7:sty==='casual'?.35:.5,similarity_boost:.8}})},sig);return dec(await r.arrayBuffer())}
+if(prov==='gcloud'){const r=await jf('https://texttospeech.googleapis.com/v1/text:synthesize?key='+encodeURIComponent(kget('tts_gcloud')),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:{text:t},voice:{languageCode:'pt-BR',name:P.tv?.gcloud||'pt-BR-Neural2-B'},audioConfig:{audioEncoding:'MP3',speakingRate:P.rate||1}})},sig),j=await r.json();return dec(ub64(j.audioContent).buffer)}
+if(prov==='azure'){const pc=Math.round(((P.rate||1)-1)*100),r=await jf('https://'+(P.reg||'brazilsouth')+'.tts.speech.microsoft.com/cognitiveservices/v1',{method:'POST',headers:{'Ocp-Apim-Subscription-Key':kget('tts_azure'),'Content-Type':'application/ssml+xml','X-Microsoft-OutputFormat':'audio-24khz-48kbitrate-mono-mp3'},body:"<speak version='1.0' xml:lang='pt-BR'><voice name='"+(P.tv?.azure||'pt-BR-AntonioNeural')+"'><prosody rate='"+(pc>=0?'+':'')+pc+"%'>"+xesc(t)+'</prosody></voice></speak>'},sig);return dec(await r.arrayBuffer())}
+throw Error('provedor de voz desconhecido')}
+function playBuf(buf){return new Promise(res=>{const ac=GP.ac;ac.resume();const src=ac.createBufferSource(),an=ac.createAnalyser(),g=ac.createGain(),b=new Float32Array(512);g.gain.value=P.vol;src.buffer=buf;if(['gem','eleven'].includes(engOf()))src.playbackRate.value=P.rate||1;src.connect(g);g.connect(an);an.connect(ac.destination);GP.src=src;
+const iv=setInterval(()=>{an.getFloatTimeDomainData(b);orb.classList.toggle('beat',Math.sqrt(b.reduce((a,x)=>a+x*x,0)/b.length)>.05)},80);src.onended=()=>{clearInterval(iv);orb.classList.remove('beat');GP.src=null;res()};src.start()})}
+async function cloudSpeak(prov,t){GP.stopped=0;GP.ab=new AbortController();setState('speaking');const sty=P.vs&&P.vs!=='auto'?P.vs:styleOf(t),parts=chunks(t,300).slice(0,8),one=i=>{const p=synth(prov,parts[i],GP.ab.signal,sty);p.catch(()=>{});return p};let nx=one(0);
+try{for(let i=0;i<parts.length;i++){const buf=await nx;if(i+1<parts.length)nx=one(i+1);await playBuf(buf);if(GP.stopped)break}}finally{MV.spEnd=Date.now();rest()}}
+async function speak(t){t=clean(t);if(!t)return;const pv=engOf();
+if(pv!=='nav'){const k=pv==='gem'?kget('gemini'):kget('tts_'+pv);if(!k)toast('Voz '+pv+' sem chave: usando a voz do aparelho.');else try{await cloudSpeak(pv,t);DG.voz='ok · '+now().slice(11,19);return}catch(e){if(GP.stopped)return;mLog('Voz '+pv+': '+e.message);DG.voz='falhou: '+String(e.message).slice(0,60);toast('Voz natural indisponível ('+String(e.message).slice(0,60)+'). Usando a voz do aparelho.')}}
+return navSpeak(t)}
+function syncTts(){const e=engOf();$('#eng').value=e;$('#tvn').value=(P.tv||{})[e]||(e==='gem'?P.gv||'':'');$('#tmd').value=(P.tm||{})[e]||'';$('#trg').value=P.reg||''}
+$('#eng').onchange=e=>{P.eng=e.target.value;svp();syncTts()};
+$('#tk').onchange=e=>{const v=e.target.value.trim();if(v){kset(engOf()==='gem'?'gemini':'tts_'+engOf(),v);e.target.value='';toast('Chave salva neste navegador')}};
+$('#tvn').onchange=e=>{P.tv=P.tv||{};P.tv[engOf()]=e.target.value.trim();svp()};$('#tmd').onchange=e=>{P.tm=P.tm||{};P.tm[engOf()]=e.target.value.trim();svp()};
+$('#trg').onchange=e=>{P.reg=e.target.value.trim();svp()};$('#tst').onchange=e=>{P.vs=e.target.value;svp()};$('#sil').oninput=e=>{P.sil=+e.target.value;svp()};$('#brg').onchange=e=>{P.barge=e.target.checked;svp()};
+syncTts();$('#pit').value=P.pitch||.85;$('#sil').value=P.sil||1400;$('#brg').checked=P.barge!==false;$('#tst').value=P.vs||'auto';
+/* Motor de tarefas real (estados verdadeiros, etapas registradas, arquivos preservados) */
+let JOBS=[];const JST={aguardando:'Aguardando',planejando:'Planejando',executando:'Executando',em_andamento:'Em andamento',aguardando_confirmacao:'Aguardando confirmação',falhou:'Falhou',parcial:'Parcialmente concluído',concluido:'Concluído'};
+const saveJobs=()=>DB.put('jobs',JOBS);
+const jobNew=t=>{const j={id:uid(),titulo:t.slice(0,70),estado:'aguardando',etapas:[],c:now(),u:now()};JOBS.unshift(j);JOBS=JOBS.slice(0,30);saveJobs();return j};
+const jobSet=(j,e,n,d)=>{j.estado=e;j.u=now();if(n)j.etapas.push({n,d:d||'',ts:now()});saveJobs();const pv=$('#v-proj');if(pv&&!pv.hidden)renderProj()};
+const orderF=a=>[...a].sort((x,y)=>{const r=f=>/\.html$/i.test(f)?0:/\.css$/i.test(f)?1:/\.js$/i.test(f)?2:3;return r(x.caminho)-r(y.caminho)});
+const stripFence=s=>String(s).trim().replace(/^```[\w-]*\n?/,'').replace(/\n?```\s*$/,'');
+const WEBP=()=>PERSONA+'Você é o agente desenvolvedor web e designer do J.A.R.V.I.S. ';
+async function createSite(req,j){setState('planning');jobSet(j,'planejando','Planejar a estrutura do projeto');
+const pl=parseJ((await llm([{r:'user',t:'Pedido: '+req}],{sys:WEBP()+'Planeje um site estático real (HTML, CSS e JavaScript puros, sem build nem dependências externas; fontes do Google permitidas; roda em iframe isolado, sem backend). Responda SOMENTE JSON: {"nome":"","descricao":"","arquivos":[{"caminho":"index.html","objetivo":""}],"observacoes":""}. No máximo 6 arquivos, sempre com index.html; caminhos simples (html, css, js, json, svg, txt, md). Em observacoes diga o que exigiria servidor.',json:true,max:4000})).text);
+let fl=(pl.arquivos||[]).filter(a=>a&&okPath(a.caminho)).slice(0,6);if(!fl.some(a=>a.caminho==='index.html'))throw Error('o plano não incluiu index.html');fl=orderF(fl);
+const q={id:uid(),nome:String(pl.nome||'Projeto').slice(0,40),desc:String(pl.descricao||req).slice(0,200),files:{},ver:[],c:now(),estado:'em construção',testes:[],erros:[],obs:String(pl.observacoes||'')};PR.list.push(q);PR.cur=q.id;PG='index.html';savePR();j.pid=q.id;
+jobSet(j,'executando','Plano definido: '+fl.length+' arquivo(s)',fl.map(a=>a.caminho).join(', '));
+for(let i=0;i<fl.length;i++){const a=fl[i];jobSet(j,'executando','Arquivo '+(i+1)+'/'+fl.length+': '+a.caminho);const ctx=Object.entries(q.files).map(([n,c])=>'=== '+n+'\n'+c.slice(0,6000)).join('\n');
+const r=await llm([{r:'user',t:'Pedido do usuário: '+req+'\nPlano: '+JSON.stringify(fl)+'\n'+(ctx?'Arquivos já escritos (mantenha ids, classes e nomes consistentes):\n'+ctx+'\n':'')+'Escreva agora o arquivo '+a.caminho+' ('+(a.objetivo||'')+').'}],{sys:WEBP()+'Responda APENAS com o conteúdo completo do arquivo pedido, sem explicações e sem cercas de código. Código profissional, responsivo e acessível. localStorage/sessionStorage dentro de try/catch; sem fetch externo.',max:16000});
+const c=stripFence(r.text);if(c.length<20)throw Error('conteúdo vazio para '+a.caminho);q.files[a.caminho]=c;savePR()}
+return q}
+async function editSite(req,q,j){jobSet(j,'executando','Aplicar alteração: '+req.slice(0,50));const ctx=Object.entries(q.files).map(([n,c])=>'=== '+n+'\n'+c).join('\n').slice(0,60000);
+const r=await llm([{r:'user',t:'Altere o projeto: '+req+'\nARQUIVOS ATUAIS:\n'+ctx}],{sys:WEBP()+'Responda SOMENTE JSON: {"resumo":"","arquivos":[{"caminho":"","conteudo":""}]} com APENAS os arquivos alterados ou novos, completos. Caminhos simples (html, css, js, json, svg, txt, md). Preserve o que já funciona.',json:true,max:30000});
+const fs=(parseJ(r.text).arquivos||[]).filter(a=>a&&okPath(a.caminho)&&typeof a.conteudo==='string'&&a.conteudo.length<4e5);if(!fs.length)throw Error('o modelo não devolveu arquivos válidos');
+q.ver.push({ts:now(),nota:req.slice(0,60),files:{...q.files}});q.ver=q.ver.slice(-15);fs.forEach(a=>q.files[a.caminho]=a.conteudo);savePR();return fs.length}
+async function verifyProject(q,j){jobSet(j,'em_andamento','Verificar referências e executar no ambiente isolado');const miss=refsMissing(q.files),errs=await previewErrors(q);q.testes.push({ts:now(),ausentes:miss,erros:errs});q.testes=q.testes.slice(-10);
+if(errs.length||miss.length){q.erros.push({ts:now(),m:[...errs,...miss.map(m=>'ausente '+m)].join('; ')});q.erros=q.erros.slice(-10)}savePR();return{miss,errs}}
+async function buildSite(req,edit){req=String(req||'').trim();if(!req)throw Error('pedido vazio');let q=curP();if(edit&&!q)throw Error('não há projeto atual para editar');const j=jobNew((edit?'Alterar: ':'Criar: ')+req);
+try{setState('exec');if(edit)await editSite(req,q,j);else q=await createSite(req,j);
+let v=await verifyProject(q,j),fixed=false;
+if(v.errs.length||v.miss.length){jobSet(j,'em_andamento','Corrigir automaticamente (1 tentativa)');try{await editSite('Corrija: '+[...v.errs.map(e=>'erro JS: '+e),...v.miss.map(m=>'arquivo ausente: '+m)].join('; '),q,j);fixed=true}catch(e){q.erros.push({ts:now(),m:'autocorreção falhou: '+e.message})}v=await verifyProject(q,j)}
+const bad=v.errs.length||v.miss.length;q.estado=bad?'parcial':'concluído';savePR();j.pid=q.id;jobSet(j,bad?'parcial':'concluido',bad?'Concluído com pendências':'Concluído e verificado');renderProj();
+return(bad?'⚠ Parcial: ':'')+'Projeto “'+q.nome+'” '+(edit?'atualizado':'criado')+' com '+Object.keys(q.files).length+' arquivo(s) ('+Object.keys(q.files).join(', ')+'). '+(bad?'Pendências: '+[...v.errs,...v.miss.map(m=>'arquivo ausente '+m)].join('; ')+'. ':'Verificação: nenhum erro de execução nem referência quebrada'+(fixed?' (após correção automática)':'')+'. ')+(q.obs&&!edit?'Obs.: '+q.obs.replace(/[.\s]*$/,'')+'. ':'')+'Veja na aba Projetos.'}
+catch(e){const p=curP();if(!edit&&p&&Object.keys(p.files).length){p.estado='parcial';savePR()}jobSet(j,'falhou','Falha',e.message);throw Error((j.etapas.at(-2)?.n||'execução')+': '+e.message)}}
+const testHtml=q=>{const t=q.testes?.at(-1);return t?"<p class='m'>Último teste "+esc(t.ts.slice(11,19))+': '+(t.erros.length||t.ausentes.length?'⚠ '+esc([...t.erros,...t.ausentes.map(a=>'ausente '+a)].join('; ')):'✔ sem erros de execução e sem referências quebradas')+'</p>':''};
+const jobsHtml=()=>"<div class='pn'><h2>Execuções</h2>"+(JOBS.slice(0,6).map(j=>'<p><b>'+esc(JST[j.estado])+'</b> · '+esc(j.titulo)+"<br><span class='m'>"+j.etapas.slice(-3).map(e=>esc(e.n+(e.d?' — '+e.d.slice(0,60):''))).join(' → ')+'</span></p>').join('')||"<p class='m'>Nenhuma execução ainda.</p>")+"<button id='jstop'>Interromper execução</button></div>";
+const ambTest=()=>new Promise(res=>{const f=document.createElement('iframe');f.sandbox='allow-scripts';f.style.cssText='position:fixed;left:-9999px;width:10px;height:10px';const done=ok=>{removeEventListener('message',on);f.remove();res(ok)},on=e=>{if(e.source===f.contentWindow&&e.data?.jv==='ready')done(true)};addEventListener('message',on);f.srcdoc='<script>parent.postMessage({jv:"ready"},"*")<\/script>';document.body.appendChild(f);setTimeout(()=>done(false),2000)});
+
+async function init(){hist=await DB.get('history')||[];PR.list=await DB.get('proj')||[];JOBS=await DB.get('jobs')||[];JOBS.forEach(j=>{if(['aguardando','planejando','executando','em_andamento'].includes(j.estado)){j.estado='falhou';j.etapas.push({n:'Interrompida: o app foi fechado durante a execução',ts:now(),d:''})}});PR.cur=await DB.get('proj_cur')||PR.list[0]?.id||null;tasks=await DB.get('tasks')||[];notes=await DB.get('notes')||[];
 theme(P.theme);$('#vol').value=P.vol;$('#rate').value=P.rate||1;$('#tts').checked=P.tts;$('#lt').checked=P.theme==='light';fillVoices();if(TTS)TTS.onvoiceschanged=fillVoices;
 netUi();renderCmd();render();go('home');tick()}
 load().then(init).catch(e=>{$('#st').textContent='Erro de armazenamento: '+e.message});
